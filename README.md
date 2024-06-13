@@ -27,22 +27,25 @@ type TreeEngine interface {
 	Get(threadId string, ctx context.Context) (ThreadTree, error)
 
 	// GetChildren is returns the children of a particular node
-	GetChildren(threadId string, message *Message, ctx context.Context) (ThreadTree, error)
+	// if `message` is empty, engine returns the children of the root
+	// maximum `depth` is 10
+	GetChildren(threadId string, message *Mesgsage, depth int, ctx context.Context) (ThreadTree, error)
 
 	// LatestMessage is the latest added message to the tree
 	GetLatestMessage(threadId string, ctx context.Context) (Message, error)
 
 	// Pick returns a thread from a to b
 	// If `a` is empty, engine picks from the root
-	// If `a` and `b` are empty, engine picks the latest message
-	Pick(threadId string, a *Message, b *Message, ctx context.Context) (Thread, error)
+	// If `b` is empty, engine picks upto latest message
+	Pick(threadId string, a, b *Message, ctx context.Context) (Thread, error)
 
 	// Sets a particular message as the latest message and returns the node with updated values
-	SetLatestMessage(threadId string, latestMessage Message, ctx context.Context) (Message, error)
+	SetLatestMessage(threadId string, latestMessage *Message, ctx context.Context) (Message, error)
 
 	// Number of nodes in the tree
 	Size(threadId string, ctx context.Context) (int, error)
 }
+
 ```
 
 ## Cheatsheet
