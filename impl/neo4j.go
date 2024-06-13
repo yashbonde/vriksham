@@ -14,7 +14,7 @@ type Backend_Neo4j struct {
 	driver   neo4j.DriverWithContext
 }
 
-func (backend Backend_Neo4j) Connect(ctx context.Context) error {
+func (backend *Backend_Neo4j) Connect(ctx context.Context) error {
 	backend.DbUrl = "neo4j://localhost" // scheme://host(:port) (default port is 7687)
 	driver, err := neo4j.NewDriverWithContext(
 		backend.DbUrl,
@@ -185,9 +185,7 @@ func (db Backend_Neo4j) Delete(threadId string, message *Message, ctx context.Co
 }
 
 func (db Backend_Neo4j) Get(threadId string, ctx context.Context) (ThreadTree, error) {
-	output := ThreadTree{
-		Root: ThreadRoot{ThreadId: threadId},
-	}
+	output := ThreadTree{}
 	result, err := neo4j.ExecuteQuery(
 		ctx,
 		db.driver,
@@ -228,34 +226,122 @@ func (db Backend_Neo4j) Get(threadId string, ctx context.Context) (ThreadTree, e
 			})
 		}
 	}
+	if len(output.Messages) > 0 && len(output.Relations) > 0 {
+		output.Root = ThreadRoot{ThreadId: threadId}
+	} else {
+		return output, fmt.Errorf("no root found, does this thread exist?")
+	}
 	return output, nil
 }
 
-func (db Backend_Neo4j) GetChildren(threadId string, message Message, ctx context.Context) (ThreadTree, error) {
-	return ThreadTree{}, nil
+func (db Backend_Neo4j) GetChildren(threadId string, message *Message, depth int, ctx context.Context) (ThreadTree, error) {
+	output := ThreadTree{}
+	if depth <= 0 {
+		return output, fmt.Errorf("depth cannot be less than 1")
+	} else if depth > 10 {
+		return output, fmt.Errorf("depth cannot be more than 10")
+	} else if depth == 1 {
+		depth = 2
+	}
+	query := ""
+	startId := ""
+	if message == nil {
+		query += "MATCH r= (t:ThreadRoot {thread_id: $startId})"
+		startId = threadId
+	} else {
+		query += "MATCH r= (m:Message {id: $startId})"
+		startId = message.MessageId
+	}
+	query += fmt.Sprintf("-[:CHILD*0..%d]->(c:Message)\n", depth-1)
+	query += "WITH apoc.agg.graph(r) AS g RETURN g.nodes AS nodes, g.relationships AS edges;"
+	fmt.Println(query)
+	result, err := neo4j.ExecuteQuery(
+		ctx,
+		db.driver,
+		query,
+		map[string]any{"startId": startId},
+		neo4j.EagerResultTransformer,
+	)
+	if err != nil {
+		return output, err
+	}
+	elementMessages := map[string]Message{}
+	for _, record := range result.Records {
+		nodes, _ := record.Get("nodes")
+		relations, _ := record.Get("edges")
+		for _, n := range nodes.([]interface{}) {
+			node := n.(neo4j.Node)
+			m := MessageFromDict(node.GetProperties())
+			if m.MessageId != "" {
+				output.Messages = append(output.Messages, m)
+			}
+			elementMessages[node.GetElementId()] = m
+		}
+
+		for _, r := range relations.([]interface{}) {
+			relation := r.(neo4j.Relationship)
+			startMessage := elementMessages[relation.StartElementId]
+			endMessage := elementMessages[relation.EndElementId]
+			output.Relations = append(output.Relations, Triple{
+				StartId:  startMessage.MessageId,
+				Relation: relation.Type,
+				EndId:    endMessage.MessageId,
+			})
+		}
+	}
+	if len(output.Messages) > 0 && len(output.Relations) > 0 {
+		output.Root = ThreadRoot{ThreadId: threadId}
+	} else {
+		return output, fmt.Errorf("no root found, does this thread exist?")
+	}
+	return output, nil
 }
 
 func (db Backend_Neo4j) GetLatestMessage(threadId string, ctx context.Context) (Message, error) {
-	return Message{}, nil
+	output := Message{}
+	result, err := neo4j.ExecuteQuery(
+		ctx,
+		db.driver,
+		"MATCH r=(t:ThreadRoot {thread_id: $threadId})-[:CHILD*..100]->(c:Message {latest: true}) RETURN c",
+		map[string]any{"threadId": threadId},
+		neo4j.EagerResultTransformer,
+	)
+	if err != nil {
+		return output, err
+	}
+	for _, record := range result.Records {
+		node, _ := record.Get("c")
+		output = MessageFromDict(node.(neo4j.Node).GetProperties())
+	}
+	if output.MessageId == "" {
+		return output, fmt.Errorf("no latest message found")
+	}
+	return output, nil
 }
 
 func (db Backend_Neo4j) Pick(threadId string, a *Message, b *Message, ctx context.Context) (Thread, error) {
 	output := Thread{}
 	fromRoot := a == nil
-	noUpto := b == nil
-	if fromRoot && noUpto {
-		return output, fmt.Errorf("logic to pick from latest message has not been implemented yet")
-	}
+	uptoLatest := b == nil
 
-	startId := a.MessageId
+	startId := ""
+	toMessageId := ""
 	query := "MATCH p = shortestPath("
 	if fromRoot {
 		query += "(t: ThreadRoot {thread_id: $startId})"
 		startId = threadId
 	} else {
 		query += "(m0: Message {id: $startId})"
+		startId = a.MessageId
 	}
-	query += "-[CHILD*..40]->(m1: Message {id: $toMessageId}))"
+	query += "-[CHILD*..40]->"
+	if uptoLatest {
+		query += "(m1: Message {latest: true}))"
+		toMessageId = ""
+	} else {
+		query += "(m1: Message {id: $toMessageId}))"
+		toMessageId = b.MessageId
+	}
 	query += "RETURN nodes(p) as nodes, relationships(p) as edges"
 
 	// execute query and get results
@@ -265,7 +351,7 @@ func (db Backend_Neo4j) Pick(threadId string, a *Message, b *Message, ctx contex
 		query,
 		map[string]any{
 			"startId":     startId,
-			"toMessageId": b.MessageId,
+			"toMessageId": toMessageId,
 		},
 		neo4j.EagerResultTransformer,
 	)
@@ -295,8 +381,39 @@ func (db Backend_Neo4j) Pick(threadId string, a *Message, b *Message, ctx contex
 	return output, nil
 }
 
-func (db Backend_Neo4j) SetLatestMessage(threadId string, latestMessage Message, ctx context.Context) (Message, error) {
-	return Message{}, nil
+func (db Backend_Neo4j) SetLatestMessage(threadId string, latestMessage *Message, ctx context.Context) (Message, error) {
+	output := Message{}
+	if latestMessage.MessageId == "" {
+		return output, fmt.Errorf("latest message cannot be empty")
+	}
+	result, err := neo4j.ExecuteQuery(
+		ctx,
+		db.driver,
+		`
+		MATCH (t:ThreadRoot {thread_id: $threadId})-[:CHILD*0..]->(c:Message)
+		SET c.latest = false
+		WITH c
+		WHERE c.id = $latestMessageId
+		SET c.latest = true
+		RETURN c
+		`,
+		map[string]any{
+			"threadId":        threadId,
+			"latestMessageId": latestMessage.MessageId,
+		},
+		neo4j.EagerResultTransformer,
+	)
+	if err != nil {
+		return output, err
+	}
+	for _, record := range result.Records {
+		node, _ := record.Get("c")
+		output = MessageFromDict(node.(neo4j.Node).GetProperties())
+	}
+	if output.MessageId == "" {
+		return output, fmt.Errorf("no latest message found")
+	}
+	return output, nil
 }
 
 func (db Backend_Neo4j) Size(threadId string, ctx context.Context) (int, error) {
