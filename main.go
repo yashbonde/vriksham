@@ -83,15 +83,15 @@ func GetDemoTree() Impl.ThreadTree {
 	}
 }
 
-func run(backend Impl.Backend_Neo4j) {
+func run(backend Impl.TreeEngine) {
 	ctx := context.Context(context.Background())
 	backend.Connect(ctx)
 
 	// Writing
 	demoTree := GetDemoTree()
 	// err := backend.AddTree(demoTree.Root.ThreadId, demoTree, ctx)
-	// err := backend.AddMessage(demoTree.Root.ThreadId, &Impl.Message{MessageId: "new_00"}, nil, ctx)
-	// err := backend.AddMessage(demoTree.Root.ThreadId, &Impl.Message{MessageId: "new_01"}, &Impl.Message{MessageId: "new_00"}, ctx)
+	// err := backend.AddMessage(demoTree.Root.ThreadId, Impl.Message{MessageId: "new_00"}, nil, ctx)
+	// err := backend.AddMessage(demoTree.Root.ThreadId, Impl.Message{MessageId: "new_01"}, &Impl.Message{MessageId: "new_00"}, ctx)
 
 	// Querying
 	//

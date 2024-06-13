@@ -14,22 +14,22 @@ type Backend_Neo4j struct {
 	driver   neo4j.DriverWithContext
 }
 
-func (backend *Backend_Neo4j) Connect(ctx context.Context) (neo4j.DriverWithContext, error) {
+func (backend Backend_Neo4j) Connect(ctx context.Context) error {
 	backend.DbUrl = "neo4j://localhost" // scheme://host(:port) (default port is 7687)
 	driver, err := neo4j.NewDriverWithContext(
 		backend.DbUrl,
 		neo4j.BasicAuth(backend.AuthUser, backend.AuthPass, ""),
 	)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	backend.driver = driver
-	return driver, nil
+	return nil
 }
 
 // implement interface
 
-func (db Backend_Neo4j) AddMessage(threadId string, a *Message, b *Message, ctx context.Context) error {
+func (db Backend_Neo4j) AddMessage(threadId string, a Message, b *Message, ctx context.Context) error {
 	addToRoot := b == nil
 	query := ""
 	parentId := ""
@@ -229,6 +229,10 @@ func (db Backend_Neo4j) Get(threadId string, ctx context.Context) (ThreadTree, e
 		}
 	}
 	return output, nil
+}
+
+func (db Backend_Neo4j) GetChildren(threadId string, message Message, ctx context.Context) (ThreadTree, error) {
+	return ThreadTree{}, nil
 }
 
 func (db Backend_Neo4j) GetLatestMessage(threadId string, ctx context.Context) (Message, error) {

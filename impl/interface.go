@@ -60,23 +60,21 @@ their needs the best.
 
 type TreeEngine interface {
 	// Connect is used to connect to the database
-	Connect(driver interface{}, ctx context.Context) error
+	Connect(ctx context.Context) error
 
 	// AddMessageToParent adds a message to the parent message
 	// If `b` is empty, engine adds the message to the root
-	AddMessage(threadId string, a, b Message, ctx context.Context) (Thread, error)
+	AddMessage(threadId string, a Message, b *Message, ctx context.Context) error
 
 	// Add an entire tree in the database
 	AddTree(threadId string, tree ThreadTree, ctx context.Context) error
 
 	// The number of leaves
-	Breadth(threadId string, ctx context.Context) (int32, error)
+	Breadth(threadId string, ctx context.Context) (int, error)
 
 	// Delete a node and all children / relations from it
-	Delete(threadId string, message Message, ctx context.Context) error
-
-	// Delete a node and all children / relations from it
-	DeleteTree(threadId string, ctx context.Context) error
+	// if message is empty, engine deletes the entire tree
+	Delete(threadId string, message *Message, ctx context.Context) error
 
 	// Get is returns the entire tree
 	Get(threadId string, ctx context.Context) (ThreadTree, error)
@@ -90,11 +88,11 @@ type TreeEngine interface {
 	// Pick returns a thread from one point to another
 	// If `a` is empty, engine picks from the root
 	// If `a` and `b` are empty, engine picks the latest message
-	Pick(threadId string, a, b Message, ctx context.Context) (Thread, error)
+	Pick(threadId string, a *Message, b *Message, ctx context.Context) (Thread, error)
 
 	// Sets a particular message as the latest message and returns the node with updated values
 	SetLatestMessage(threadId string, latestMessage Message, ctx context.Context) (Message, error)
 
 	// Number of nodes in the tree
-	Size(threadId string, ctx context.Context) (int32, error)
+	Size(threadId string, ctx context.Context) (int, error)
 }
