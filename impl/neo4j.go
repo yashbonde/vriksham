@@ -29,7 +29,10 @@ func (backend *Backend_Neo4j) Connect(ctx context.Context) error {
 
 // implement interface
 
-func (db Backend_Neo4j) AddMessage(threadId string, a Message, b *Message, ctx context.Context) error {
+func (db Backend_Neo4j) AddMessage(threadId string, a, b *Message, ctx context.Context) error {
+	if a == nil {
+		return fmt.Errorf("message to be inserted cannot be empty")
+	}
 	addToRoot := b == nil
 	query := ""
 	parentId := ""
@@ -89,7 +92,11 @@ func (db Backend_Neo4j) AddTree(threadId string, tree ThreadTree, ctx context.Co
 	for i, m := range tree.Messages {
 		fullData[fmt.Sprintf("m%d_id", i)] = m.MessageId
 		messageIdToQueryId[m.MessageId] = fmt.Sprintf("m%d", i)
-		query += fmt.Sprintf("MERGE (m%d:Message {id: $m%d_id})\n", i, i)
+		if !m.Latest {
+			query += fmt.Sprintf("MERGE (m%d:Message {id: $m%d_id})\n", i, i)
+		} else {
+			query += fmt.Sprintf("MERGE (m%d:Message {id: $m%d_id, latest: true})\n", i, i)
+		}
 	}
 
 	for _, r := range tree.Relations {
@@ -148,6 +155,35 @@ func (db Backend_Neo4j) Breadth(threadId string, ctx context.Context) (int, erro
 	return output, nil
 }
 
+func (db Backend_Neo4j) Degree(threadId string, message *Message, ctx context.Context) (int, error) {
+	fullData := map[string]any{}
+	var query string
+	if message == nil {
+		fullData["startId"] = threadId
+		query = "MATCH (t:ThreadRoot {thread_id: $startId})-[:CHILD]->(c:Message) RETURN COUNT(c) as count"
+	} else {
+		fullData["startId"] = message.MessageId
+		query = "MATCH (m:Message {id: $startId})-[:CHILD]->(c:Message) RETURN COUNT(c) as count"
+	}
+
+	output := 0
+	result, err := neo4j.ExecuteQuery(
+		ctx,
+		db.driver,
+		query,
+		fullData,
+		neo4j.EagerResultTransformer,
+	)
+	if err != nil {
+		return output, err
+	}
+	for _, record := range result.Records {
+		count, _ := record.Get("count")
+		output = int(count.(int64))
+	}
+	return output, nil
+}
+
 func (db Backend_Neo4j) Delete(threadId string, message *Message, ctx context.Context) error {
 	fromRoot := message == nil
 	query := ""
@@ -182,6 +218,33 @@ func (db Backend_Neo4j) Delete(threadId string, message *Message, ctx context.Co
 		result.Summary.ResultAvailableAfter())
 
 	return nil
+}
+
+func (db Backend_Neo4j) Depth(threadId string, ctx context.Context) (int, error) {
+	output := 0
+	result, err := neo4j.ExecuteQuery(
+		ctx,
+		db.driver,
+		`
+		MATCH p=(t:ThreadRoot {thread_id: $threadId})-[:CHILD*0..]->(c:Message)
+		WHERE NOT (c)-[:CHILD]->()
+		RETURN  LENGTH(p) as depth
+		ORDER BY LENGTH(p) DESC
+		LIMIT 1;
+		`,
+		map[string]any{
+			"threadId": threadId,
+		},
+		neo4j.EagerResultTransformer,
+	)
+	if err != nil {
+		return output, nil
+	}
+	for _, record := range result.Records {
+		depth, _ := record.Get("depth")
+		output = int(depth.(int64))
+	}
+	return output, nil
 }
 
 func (db Backend_Neo4j) Get(threadId string, ctx context.Context) (ThreadTree, error) {
@@ -383,7 +446,7 @@ func (db Backend_Neo4j) Pick(threadId string, a *Message, b *Message, ctx contex
 
 func (db Backend_Neo4j) SetLatestMessage(threadId string, latestMessage *Message, ctx context.Context) (Message, error) {
 	output := Message{}
-	if latestMessage.MessageId == "" {
+	if latestMessage == nil {
 		return output, fmt.Errorf("latest message cannot be empty")
 	}
 	result, err := neo4j.ExecuteQuery(
@@ -422,7 +485,7 @@ func (db Backend_Neo4j) Size(threadId string, ctx context.Context) (int, error) 
 		ctx,
 		db.driver,
 		`
-		MATCH r=(ThreadRoot {thread_id: 'tree_0000'})-[:CHILD*0..]->(c:Message)
+		MATCH r=(ThreadRoot {thread_id: $threadId})-[:CHILD*0..]->(c:Message)
 		RETURN COUNT(nodes(r)) as count
 		`,
 		map[string]any{

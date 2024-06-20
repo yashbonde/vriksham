@@ -144,7 +144,7 @@ their needs the best.
 type TreeEngine interface {
 	// AddMessageToParent adds a message to the parent message
 	// If `b` is empty, engine adds the message to the root
-	AddMessage(threadId string, a Message, b *Message, ctx context.Context) error
+	AddMessage(threadId string, a, b *Message, ctx context.Context) error
 
 	// Add an entire tree in the database
 	AddTree(threadId string, tree ThreadTree, ctx context.Context) error
@@ -152,9 +152,16 @@ type TreeEngine interface {
 	// The number of leaves
 	Breadth(threadId string, ctx context.Context) (int, error)
 
+	// For a given node, its number of children. A leaf, by definition, has degree zero.
+	// if `message` is empty, engine returns the degree of the root
+	Degree(threadId string, message *Message, ctx context.Context) (int, error)
+
 	// Delete a node and all children / relations from it
 	// if message is empty, engine deletes the entire tree
 	Delete(threadId string, message *Message, ctx context.Context) error
+
+	// Depth of the tree is the maximum level of any node in the tree
+	Depth(threadId string, ctx context.Context) (int, error)
 
 	// Get is returns the entire tree
 	Get(threadId string, ctx context.Context) (ThreadTree, error)
